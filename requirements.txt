@@ -1,5 +1,6 @@
 # Core MCP and Server Framework
 fastmcp>=0.1.0
+mcp>=1.9.0,<2.0.0
 uvicorn>=0.24.0
 
 # HTTP and API Integration
