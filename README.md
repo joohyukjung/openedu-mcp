@@ -9,8 +9,6 @@ K-12부터 대학 수준까지 대응하는 교육 자료 검색 MCP 서버입�
 | 항목 | 내용 |
 |---|---|
 | MCP 명칭 | OpenEdu MCP |
-| 서비스명(kebab) | openedu-mcp |
-| 게이트웨이 식별자(camelCase) | openeduMcp |
 | 원본 저장소 | https://github.com/Cicatriiz/openedu-mcp |
 | 언어/런타임 | Python 3.9+, `mcp.server.fastmcp.FastMCP` |
 | Transport | stdio(원본) + **streamable HTTP(신규 브릿지)** |
