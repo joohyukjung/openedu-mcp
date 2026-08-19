@@ -17,7 +17,6 @@ K-12부터 대학 수준까지 대응하는 교육 자료 검색 MCP 서버입�
 | 인증 | 없음 — 4개 데이터 소스 전부 공개 API, 키 불필요 |
 | 로컬 상태 | SQLite(`/data/cache.db`, 캐시+사용량 통계 겸용) → **PVC 필요** |
 | 도구 수 | 22개 |
-| 프로덕션 엔드포인트 | `http://k8s-aws-pri.goover.ai:35618/mcp` |
 
 ## 소개
 
@@ -196,40 +195,9 @@ docker run -d --name openedu-mcp-test -p 8069:8000 openedu-mcp:latest
 - `tools/list` — 22개 도구 정상 반환
 - `tools/call`(`get_word_definition`, `"photosynthesis"`) — dictionaryapi.dev 실제 호출 성공, 정의·발음·교육 메타데이터까지 정상 반환
 
-### ECR 푸시
+## 배포
 
-```bash
-aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com
-
-aws ecr describe-repositories --repository-names openedu-mcp --region ap-northeast-2 \
-  || aws ecr create-repository --repository-name openedu-mcp --region ap-northeast-2
-
-GIT_SHA=$(git rev-parse --short HEAD)
-
-docker tag openedu-mcp:latest 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:$GIT_SHA
-docker tag openedu-mcp:latest 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:latest
-
-docker push 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:$GIT_SHA
-docker push 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:latest
-```
-
-## 배포 (Rancher)
-
-| 항목 | 값 |
-|---|---|
-| Workload명 | `prod-openedu-mcp` |
-| 이미지 | `851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:latest` |
-| Container Port | 8000 |
-| 환경변수 | `OPENEDU_MCP_HOST=0.0.0.0`, `OPENEDU_MCP_PORT=8000`, `OPENEDU_MCP_CACHE_PATH=/data/cache.db` |
-| PVC | `prod-openedu-mcp-data` (EBS gp3, RWO, 1Gi) → `/data` 마운트 |
-| Deployment 전략 | **Recreate** (RollingUpdate → 변경, RWO Multi-Attach 데드락 방지, replica 1) |
-| Service | NodePort, 35618 |
-
-### 프로덕션 엔드포인트
-
-```
-http://k8s-aws-pri.goover.ai:35618/mcp
-```
+내부 인프라(ECR, Rancher/K8s) 배포 설정은 보안상 이 문서에서 제외했습니다. 배포 관련 문의는 내부 인프라 담당자에게 문의해 주세요.
 
 ## 이 포크만의 특징적인 사항
 
