@@ -1,870 +1,244 @@
-# OpenEdu MCP Server
+# OpenEdu MCP
 
-A comprehensive Model Context Protocol (MCP) server designed to provide educational resources and support curriculum planning for educators. This server integrates with multiple educational APIs to provide access to books, articles, definitions, and research papers with intelligent educational filtering and grade-level appropriateness.
+K-12부터 대학 수준까지 대응하는 교육 자료 검색 MCP 서버입니다. Open Library, Wikipedia, Dictionary API, arXiv 4개의 공개 API를 결합해 도서 추천, 위키 문서 요약, 어휘 분석, 학술 논문 검색까지 22개 도구로 제공합니다.
 
-## 🎓 Features
+> 이 저장소는 [Cicatriiz/openedu-mcp](https://github.com/Cicatriiz/openedu-mcp)를 **Goover MCP Hub** 배포용으로 포크·수정한 버전입니다. 원본은 stdio transport 전용이었으며, 이 저장소에서 streamable HTTP transport 지원을 추가하고 기동 자체가 불가능했던 치명적 버그를 수정했습니다.
 
-### Complete API Integration Suite
-- **📚 Open Library Integration**: Educational book search, recommendations, and metadata
-- **🌐 Wikipedia Integration**: Educational article analysis with grade-level filtering
-- **📖 Dictionary Integration**: Vocabulary analysis and language learning support
-- **🔬 arXiv Integration**: Academic paper search with educational relevance scoring
+## 기본 정보
 
-### Educational Intelligence
-- **Grade Level Filtering**: K-2, 3-5, 6-8, 9-12, College level content
-- **Subject Classification**: Mathematics, Science, ELA, Social Studies, Arts, PE, Technology
-- **Curriculum Alignment**: Common Core, NGSS, State Standards support
-- **Educational Metadata**: Complexity scoring, reading levels, educational value assessment
+| 항목 | 내용 |
+|---|---|
+| MCP 명칭 | OpenEdu MCP |
+| 서비스명(kebab) | openedu-mcp |
+| 게이트웨이 식별자(camelCase) | openeduMcp |
+| 원본 저장소 | https://github.com/Cicatriiz/openedu-mcp |
+| 언어/런타임 | Python 3.9+, `mcp.server.fastmcp.FastMCP` |
+| Transport | stdio(원본) + **streamable HTTP(신규 브릿지)** |
+| 인증 | 없음 — 4개 데이터 소스 전부 공개 API, 키 불필요 |
+| 로컬 상태 | SQLite(`/data/cache.db`, 캐시+사용량 통계 겸용) → **PVC 필요** |
+| 도구 수 | 22개 |
+| 프로덕션 엔드포인트 | `http://k8s-aws-pri.goover.ai:35618/mcp` |
 
-### Performance & Reliability
-- **Intelligent Caching**: SQLite-based caching with TTL support
-- **Rate Limiting**: Built-in rate limiting to respect API quotas
-- **Usage Analytics**: Comprehensive usage tracking and performance metrics
-- **Error Handling**: Robust error handling with educational context preservation
+## 소개
 
-## 🚀 Quick Start
+**English**
 
-### Prerequisites
+> OpenEdu MCP provides curated educational resources for K-12 through college-level learning by combining four public APIs: Open Library, Wikipedia, Dictionary API, and arXiv. It offers 22 tools covering educational book search and recommendations by grade level, Wikipedia article search with grade-appropriate summaries and featured articles, dictionary lookups with vocabulary complexity analysis and pronunciation guides, and academic paper search with research trend analysis by subject and academic level. Every tool tags results with grade-level appropriateness (K-2 through College) and curriculum alignment (e.g., Common Core). Responses are cached locally to reduce redundant API calls. No API keys or authentication are required for any of the underlying data sources.
 
-- Python 3.9 or higher
-- pip package manager
+**한글**
 
-### Installation
+> OpenEdu MCP는 Open Library, Wikipedia, Dictionary API, arXiv 등 4개의 공개 API를 결합해 K-12부터 대학 수준까지 교육 자료를 제공하는 MCP입니다. 총 22개 도구로 학년별 교육 도서 검색·추천, 학년 수준에 맞춘 위키피디아 문서 검색·요약·오늘의 추천 문서, 어휘 난이도 분석과 발음 가이드를 포함한 사전 조회, 주제·학업 수준별 학술 논문 검색과 연구 동향 분석을 지원합니다. 모든 결과에 학년 적합도(K-2~College)와 교육과정 연계 정보(Common Core 등)가 태그로 붙습니다. 응답은 로컬 캐시로 저장되어 중복 호출을 줄이며, 별도의 API 키나 인증 없이 사용 가능합니다.
 
-1. **Clone the repository:**
+## 제공 도구 (22개)
+
+| 카테고리 | 개수 | 도구명 |
+|---|---|---|
+| Open Library (도서) | 4 | `search_educational_books`, `get_book_details_by_isbn`, `search_books_by_subject`, `get_book_recommendations` |
+| Wikipedia (문서) | 5 | `search_educational_articles`, `get_article_summary`, `get_article_content`, `get_featured_article`, `get_articles_by_subject` |
+| Dictionary (사전/어휘) | 6 | `get_word_definition`, `get_vocabulary_analysis`, `get_word_examples`, `get_pronunciation_guide`, `get_related_vocabulary` |
+| arXiv (학술논문) | 6 | `search_academic_papers`, `get_paper_summary`, `get_recent_research`, `get_research_by_level`, `analyze_research_trends` |
+| 기타 | 2 | `handle_stdio_input`, `get_server_status` |
+
+프롬프트/리소스는 제공하지 않는 순수 tool 기반 MCP입니다.
+
+## 원본 대비 변경 사항
+
+### 버그 수정
+
+**1. import 시점 크래시 — 서버 자체가 기동 불가능했던 치명적 결함**
+
+원본 `src/main.py` 하단에 미완성 SSE 실험 코드가 남아 있었습니다.
+
+```python
+@mcp.tool(route="/events", methods=["GET"])  # Assuming a route decorator might exist or be added to FastMCP
+async def stream_events(request: Request) -> StreamingResponse:
+```
+
+`@mcp.tool()`은 `route`/`methods` 인자를 지원하지 않아 `TypeError`로 즉시 크래시가 발생했고, 이 때문에 stdio 모드로도 서버 실행 자체가 불가능한 상태였습니다. `sse_event_generator`와 `stream_events` 함수 전체(약 34줄)를 제거했습니다.
+
+**2. `mcp` 패키지가 직접 의존성 목록에 없음**
+
+`requirements.txt`/`pyproject.toml`에는 `fastmcp>=0.1.0`만 명시되어 있었지만, 실제 코드는 이와 별개인 `mcp.server.fastmcp`를 임포트하고 있었습니다. `fastmcp` 패키지의 전이 의존성으로 우연히 동작하던 상태라, 향후 `fastmcp` 의존성이 바뀌면 깨질 수 있는 취약한 구조였습니다. `mcp>=1.9.0,<2.0.0`을 직접 의존성으로 추가했습니다.
+
+**3. HTTP transport 설정 누락**
+
+```python
+# 변경 전
+mcp = FastMCP("openedu-mcp-server")
+
+# 변경 후
+mcp = FastMCP(
+    "openedu-mcp-server",
+    host=os.getenv("OPENEDU_MCP_HOST", "0.0.0.0"),
+    port=int(os.getenv("OPENEDU_MCP_PORT", "8000")),
+    stateless_http=True,
+)
+```
+
+`import os` 누락도 함께 추가했습니다.
+
+### 참고 — 코드 수정 없이 배포로 해결한 항목
+
+`src/config.py`의 `load_config()`가 `config/default.yaml`을 프로세스 cwd 기준 상대경로로 탐색하는 구조라, Dockerfile의 `WORKDIR`을 레포 루트로 맞춰서 해결했습니다(코드 변경 불필요).
+
+### HTTP 브릿지 추가
+
+기존 `main()`(stdio 경로)은 전혀 건드리지 않고, `src/main.py`에 `main_http()` 함수를 신설했습니다.
+
+```python
+def main_http():
+    """HTTP entry point for the OpenEdu MCP Server (streamable-http transport).
+
+    Added for Goover MCP Hub deployment; the original stdio path via main()
+    is untouched.
+    """
+    try:
+        asyncio.run(initialize_services())
+
+        import atexit
+        atexit.register(lambda: asyncio.run(cleanup_services()))
+
+        logger.info("Starting OpenEdu MCP Server (HTTP)...")
+
+        mcp.run(transport="streamable-http")
+
+    except KeyboardInterrupt:
+        logger.info("Server shutdown requested")
+    except Exception as e:
+        logger.error(f"Server startup failed:{e}")
+        sys.exit(1)
+    finally:
+        logger.info("OpenEdu MCP Server stopped")
+```
+
+신규 파일 `src/http_entrypoint.py`:
+
+```python
+"""
+HTTP entrypoint for OpenEdu MCP Server (Goover MCP Hub deployment).
+
+Runs the server over streamable-http transport by invoking main_http()
+from main.py. The original stdio entrypoint (main.py's main(), run via
+`python src/main.py`) is left completely untouched.
+
+Must be run with the repository root as the working directory, since
+config.py resolves "config/default.yaml" relative to the process cwd.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+import main
+
+if __name__ == "__main__":
+    main.main_http()
+```
+
+`pyproject.toml`에 추가된 항목:
+
+```toml
+dependencies = [..., "mcp>=1.9.0,<2.0.0", ...]
+
+[project.scripts]
+openedu-mcp-server = "src.main:main"
+openedu-mcp-server-http = "src.main:main_http"
+```
+
+trailing-slash 테스트 결과: bare `/mcp`는 200, `/mcp/`는 307을 반환하여, 별도 ASGI 래퍼 없이 정상 동작함을 확인했습니다.
+
+## 실행 방법
+
+### stdio (원본 방식, 그대로 유지)
+
 ```bash
-git clone https://github.com/Cicatriiz/openedu-mcp.git
-cd openedu-mcp
+python src/main.py
 ```
 
-2. **Install dependencies:**
+### streamable HTTP (신규, Goover MCP Hub 배포용)
+
 ```bash
-pip install -r requirements.txt
+python src/http_entrypoint.py
 ```
 
-3. **Set up configuration:**
+## Docker
+
+### Dockerfile
+
+```dockerfile
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV OPENEDU_MCP_HOST=0.0.0.0
+ENV OPENEDU_MCP_PORT=8000
+ENV OPENEDU_MCP_CACHE_PATH=/data/cache.db
+
+EXPOSE 8000
+
+CMD ["python", "src/http_entrypoint.py"]
+```
+
+### 로컬 빌드 및 스모크 테스트
+
 ```bash
-cp .env.example .env
-# Edit .env with your preferred settings if needed
+docker build --no-cache --platform linux/amd64 -t openedu-mcp:latest .
+docker run -d --name openedu-mcp-test -p 8069:8000 openedu-mcp:latest
 ```
 
-4. **Run the server:**
+검증 완료 항목:
+- `initialize` — 세션 ID 없음, stateless 정상 동작
+- `tools/list` — 22개 도구 정상 반환
+- `tools/call`(`get_word_definition`, `"photosynthesis"`) — dictionaryapi.dev 실제 호출 성공, 정의·발음·교육 메타데이터까지 정상 반환
+
+### ECR 푸시
+
 ```bash
-python -m src.main
+aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com
+
+aws ecr describe-repositories --repository-names openedu-mcp --region ap-northeast-2 \
+  || aws ecr create-repository --repository-name openedu-mcp --region ap-northeast-2
+
+GIT_SHA=$(git rev-parse --short HEAD)
+
+docker tag openedu-mcp:latest 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:$GIT_SHA
+docker tag openedu-mcp:latest 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:latest
+
+docker push 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:$GIT_SHA
+docker push 851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:latest
 ```
 
-5. **Test the installation:**
-```bash
-   python run_validation_tests.py
-```
-
-### Development Setup
-
-For development, install additional dependencies:
-```bash
-pip install -r requirements-dev.txt
-```
-
-Run tests:
-```bash
-# Unit tests
-pytest tests/
-
-# Integration tests
-pytest tests/test_integration/
-
-# Performance tests
-pytest tests/test_performance.py
-```
-
-Format code:
-```bash
-black src tests
-isort src tests
-```
-
-## 🛠️ MCP Tools Reference
-
-The Education MCP Server provides **21+ MCP tools** across four API integrations:
-
-### 📚 Open Library Tools (4 tools)
-
-#### `search_educational_books`
-Search for educational books with grade-level and subject filtering.
-```python
-search_educational_books(
-    query="mathematics",
-    subject="Mathematics", 
-    grade_level="6-8",
-    limit=10
-)
-```
-
-#### `get_book_details_by_isbn`
-Get detailed book information by ISBN with educational metadata.
-```python
-get_book_details_by_isbn(
-    isbn="9780134685991",
-    include_cover=True
-)
-```
-
-#### `search_books_by_subject`
-Search books by educational subject with curriculum alignment.
-```python
-search_books_by_subject(
-    subject="Science",
-    grade_level="3-5",
-    limit=10
-)
-```
-
-#### `get_book_recommendations`
-Get curated book recommendations for specific grade levels.
-```python
-get_book_recommendations(
-    grade_level="9-12",
-    subject="Physics",
-    limit=5
-)
-```
-
-### 🌐 Wikipedia Tools (5 tools)
-
-#### `search_educational_articles`
-Search Wikipedia articles with educational filtering and analysis.
-```python
-search_educational_articles(
-    query="photosynthesis",
-    grade_level="3-5",
-    subject="Science",
-    limit=5
-)
-```
-
-#### `get_article_summary`
-Get article summaries with educational metadata and complexity analysis.
-```python
-get_article_summary(
-    title="Solar System",
-    include_educational_analysis=True
-)
-```
-
-#### `get_article_content`
-Get full article content with educational enrichment.
-```python
-get_article_content(
-    title="Photosynthesis",
-    include_images=True
-)
-```
-
-#### `get_featured_article`
-Get Wikipedia's featured article with educational analysis.
-```python
-get_featured_article(
-    date="2024/01/15",
-    language="en"
-)
-```
-
-#### `get_articles_by_subject`
-Get articles by educational subject with grade-level filtering.
-```python
-get_articles_by_subject(
-    subject="Mathematics",
-    grade_level="6-8",
-    limit=10
-)
-```
-
-### 📖 Dictionary Tools (5 tools)
-
-#### `get_word_definition`
-Get educational word definitions with grade-appropriate complexity.
-```python
-get_word_definition(
-    word="ecosystem",
-    grade_level="6-8",
-    include_pronunciation=True
-)
-```
-
-#### `get_vocabulary_analysis`
-Analyze word complexity and educational value.
-```python
-get_vocabulary_analysis(
-    word="photosynthesis",
-    context="plant biology lesson"
-)
-```
-
-#### `get_word_examples`
-Get educational examples and usage contexts for vocabulary.
-```python
-get_word_examples(
-    word="fraction",
-    grade_level="3-5",
-    subject="Mathematics"
-)
-```
-
-#### `get_pronunciation_guide`
-Get phonetic information and pronunciation guides.
-```python
-get_pronunciation_guide(
-    word="photosynthesis",
-    include_audio=True
-)
-```
-
-#### `get_related_vocabulary`
-Get synonyms, antonyms, and related educational terms.
-```python
-get_related_vocabulary(
-    word="democracy",
-    relationship_type="related",
-    grade_level="9-12",
-    limit=10
-)
-```
-
-### 🔬 arXiv Tools (5 tools)
-
-#### `search_academic_papers`
-Search academic papers with educational relevance filtering.
-```python
-search_academic_papers(
-    query="machine learning education",
-    academic_level="Undergraduate",
-    subject="Computer Science",
-    max_results=10
-)
-```
-
-#### `get_paper_summary`
-Get paper summaries with educational analysis and accessibility scoring.
-```python
-get_paper_summary(
-    paper_id="2301.00001",
-    include_educational_analysis=True
-)
-```
-
-#### `get_recent_research`
-Get recent research papers by educational subject.
-```python
-get_recent_research(
-    subject="Physics",
-    days=30,
-    academic_level="High School",
-    max_results=5
-)
-```
-
-#### `get_research_by_level`
-Get research papers appropriate for specific academic levels.
-```python
-get_research_by_level(
-    academic_level="Graduate",
-    subject="Mathematics",
-    max_results=10
-)
-```
-
-#### `analyze_research_trends`
-Analyze research trends for educational insights.
-```python
-analyze_research_trends(
-    subject="Artificial Intelligence",
-    days=90
-)
-```
-
-### 🖥️ Server Tools (1 tool)
-
-#### `get_server_status`
-Get comprehensive server status and performance metrics.
-```python
-get_server_status()
-```
-
-## 🔌 Connectivity Endpoints
-
-This section details how to interact with the OpenEdu MCP Server through various interfaces, including direct standard I/O, HTTP for tool execution, and Server-Sent Events for real-time updates.
-
-### Stdio Tool (`handle_stdio_input`)
-
-The server includes a tool designed for direct command-line or piped input.
-
-- **Tool Name**: `handle_stdio_input`
-- **Description**: Processes a single line of text input and returns a transformed version. This is useful for basic interaction or scripting with the MCP server if it's configured to listen to stdin.
-- **Signature**: `async def handle_stdio_input(ctx: Context, input_string: str) -> str`
-- **Example Interaction**:
-    ```
-    Tool: handle_stdio_input
-    Input: "your text here"
-    Output: "Processed: YOUR TEXT HERE"
-    ```
-
-### HTTP Endpoint for MCP Tools
-
-All registered MCP tools (including `handle_stdio_input` and the 20+ tools listed above) are accessible via HTTP. This allows integration with various applications and services. The server likely uses a JSON RPC style for these interactions.
-
-- **Endpoint**: `POST /mcp` (This is a common convention for FastMCP servers supporting JSON RPC)
-- **Request Method**: `POST`
-- **Headers**: `Content-Type: application/json`
-- **Request Body Structure (JSON RPC)**:
-    ```json
-    {
-        "jsonrpc": "2.0",
-        "method": "<tool_name>",
-        "params": {"param1": "value1", ...},
-        "id": "your_request_id"
-    }
-    ```
-
-- **Example `curl` call to `handle_stdio_input`**:
-    ```bash
-    curl -X POST -H "Content-Type: application/json" \
-         -d '{"jsonrpc": "2.0", "method": "handle_stdio_input", "params": {"input_string": "hello from http"}, "id": 1}' \
-         http://localhost:8000/mcp
-    ```
-
-- **Expected Response**:
-    ```json
-    {
-        "jsonrpc": "2.0",
-        "result": "Processed: HELLO FROM HTTP",
-        "id": 1
-    }
-    ```
-    If an error occurs, the `result` field will be replaced by an `error` object containing `code` and `message`.
-
-### Server-Sent Events (SSE) Endpoint
-
-The server provides an SSE endpoint for real-time notifications. This is useful for clients that need to stay updated with server-initiated events.
-
-- **Endpoint**: `GET /events`
-- **Description**: Streams events from the server to the client.
-- **Event Format**: Each event is sent as a block of text:
-    ```
-    event: <event_type>
-    data: <json_payload_of_the_event_data>
-    id: <optional_event_id>
-
-    ```
-    (Note: An empty line separates events.)
-
-- **Known Events**:
-    - **`connected`**: Sent once when the client successfully connects to the SSE stream.
-        - `data`: `{"message": "Successfully connected to SSE stream"}`
-    - **`ping`**: Sent periodically as a heartbeat to keep the connection alive and indicate server health.
-        - `data`: `{"heartbeat": <loop_count>, "message": "ping"}` (loop_count increments)
-    - **`error`**: Sent if an error occurs within the SSE generation stream.
-        - `data`: `{"error": "<error_message>"}`
-
-
-- **Example: Connecting with JavaScript's `EventSource`**:
-    ```javascript
-    const evtSource = new EventSource("http://localhost:8000/events");
-
-    evtSource.onopen = function() {
-        console.log("Connection to SSE opened.");
-    };
-
-    evtSource.onmessage = function(event) {
-        // Generic message handler if no specific event type is matched
-        console.log("Generic message:", event.data);
-        try {
-            const parsedData = JSON.parse(event.data);
-            console.log("Parsed generic data:", parsedData);
-        } catch (e) {
-            // Data might not be JSON
-        }
-    };
-
-    evtSource.addEventListener("connected", function(event) {
-        console.log("Event: connected");
-        console.log("Data:", JSON.parse(event.data));
-    });
-
-    evtSource.addEventListener("ping", function(event) {
-        console.log("Event: ping");
-        console.log("Data:", JSON.parse(event.data));
-    });
-
-    evtSource.addEventListener("error", function(event) {
-        if (event.target.readyState === EventSource.CLOSED) {
-            console.error("SSE Connection was closed.", event);
-        } else if (event.target.readyState === EventSource.CONNECTING) {
-            console.error("SSE Connection is reconnecting...", event);
-        } else {
-            // An error occurred while streaming, data might be available
-            console.error("SSE Error:", event);
-             if (event.data) {
-                try {
-                    console.error("Error Data:", JSON.parse(event.data));
-                } catch (e) {
-                    console.error("Error Data (raw):", event.data);
-                }
-            }
-        }
-    });
-    ```
-
-- **Example: Connecting with `curl`**:
-    ```bash
-    curl -N -H "Accept:text/event-stream" http://localhost:8000/events
-    ```
-    *(Note: `curl` will keep the connection open and print events as they arrive.)*
-
-
-## 💻 Editor & AI Tool Integration
-
-You can integrate the OpenEdu MCP Server with various AI-assisted coding tools and IDE plugins. This allows these tools to leverage the server's educational functionalities directly within your development environment. Configuration typically involves telling the editor how to start and communicate with the OpenEdu MCP server. The server is run using `python -m src.main` from the root of this project.
-
-Below are example configurations for some popular tools. You may need to adjust paths (e.g., for `cwd` or if you have a specific Python environment) based on your local setup.
-
-### Cursor
-
-To add this server to Cursor IDE:
-
-1.  Go to `Cursor Settings > MCP`.
-2.  Click `+ Add new Global MCP Server`.
-3.  Alternatively, add the following configuration to your global `.cursor/mcp.json` file (ensure `cwd` points to the root directory of this project):
-
-```json
-{
-  "mcpServers": {
-    "openedu-mcp-server": {
-      "command": "python",
-      "args": [
-        "-m",
-        "src.main"
-      ],
-      "cwd": "/path/to/your/openedu-mcp" // Replace with the actual path to this project's root
-    }
-  }
-}
-```
-See the Cursor documentation for more details.
-
-### Windsurf
-
-To set up MCP with Windsurf (formerly Cascade):
-
-1.  Navigate to `Windsurf - Settings > Advanced Settings` or use the Command Palette to `Open Windsurf Settings Page`.
-2.  Scroll down to the Cascade section and add the OpenEdu MCP server directly in `mcp_config.json` (ensure `cwd` points to the root directory of this project):
-
-```json
-{
-  "mcpServers": {
-    "openedu-mcp-server": {
-      "command": "python",
-      "args": [
-        "-m",
-        "src.main"
-      ],
-      "cwd": "/path/to/your/openedu-mcp" // Replace with the actual path to this project's root
-    }
-  }
-}
-```
-
-### Cline
-
-Add the following JSON manually to your `cline_mcp_settings.json` via Cline's MCP Server setting (ensure `cwd` points to the root directory of this project):
-
-```json
-{
-  "mcpServers": {
-    "openedu-mcp-server": {
-      "command": "python",
-      "args": [
-        "-m",
-        "src.main"
-      ],
-      "cwd": "/path/to/your/openedu-mcp" // Replace with the actual path to this project's root
-    }
-  }
-}
-```
-
-### Roo Code
-
-Access the MCP settings by clicking `Edit MCP Settings` in Roo Code settings or using the `Roo Code: Open MCP Config` command in VS Code's command palette (ensure `cwd` points to the root directory of this project):
-
-```json
-{
-  "mcpServers": {
-    "openedu-mcp-server": {
-      "command": "python",
-      "args": [
-        "-m",
-        "src.main"
-      ],
-      "cwd": "/path/to/your/openedu-mcp" // Replace with the actual path to this project's root
-    }
-  }
-}
-```
-
-### Claude
-
-Add the following to your `claude_desktop_config.json` file (ensure `cwd` points to the root directory of this project):
-
-```json
-{
-  "mcpServers": {
-    "openedu-mcp-server": {
-      "command": "python",
-      "args": [
-        "-m",
-        "src.main"
-      ],
-      "cwd": "/path/to/your/openedu-mcp" // Replace with the actual path to this project's root
-    }
-  }
-}
-```
-See the Claude Desktop documentation for more details if available.
-
-## 📋 Educational Use Cases
-
-### Elementary Education (K-2)
-```python
-# Find age-appropriate books
-books = await search_educational_books(
-    query="animals", 
-    grade_level="K-2", 
-    subject="Science"
-)
-
-# Get simple definitions
-definition = await get_word_definition(
-    word="habitat", 
-    grade_level="K-2"
-)
-
-# Find educational articles
-articles = await search_educational_articles(
-    query="animal homes", 
-    grade_level="K-2"
-)
-```
-
-### Middle School STEM (6-8)
-```python
-# Get math textbooks
-books = await search_books_by_subject(
-    subject="Mathematics", 
-    grade_level="6-8"
-)
-
-# Analyze vocabulary complexity
-analysis = await get_vocabulary_analysis(
-    word="equation", 
-    context="solving math problems"
-)
-
-# Find related terms
-related = await get_related_vocabulary(
-    word="algebra", 
-    grade_level="6-8"
-)
-```
-
-### High School Advanced (9-12)
-```python
-# Get physics recommendations
-books = await get_book_recommendations(
-    grade_level="9-12", 
-    subject="Physics"
-)
-
-# Get detailed articles
-article = await get_article_content(
-    title="Quantum mechanics"
-)
-
-# Find accessible research
-papers = await search_academic_papers(
-    query="climate change", 
-    academic_level="High School"
-)
-```
-
-### College Research
-```python
-# Find academic textbooks
-books = await search_educational_books(
-    query="calculus", 
-    grade_level="College"
-)
-
-# Get recent research
-research = await get_recent_research(
-    subject="Computer Science", 
-    academic_level="Graduate"
-)
-
-# Analyze trends
-trends = await analyze_research_trends(
-    subject="Machine Learning"
-)
-```
-
-## ⚙️ Configuration
-
-### Configuration Files
-The server uses YAML configuration files in the `config/` directory:
-
-```yaml
-# config/default.yaml
-server:
-  name: "openedu-mcp-server"
-  version: "1.0.0"
-
-education:
-  grade_levels:
-    - "K-2"
-    - "3-5" 
-    - "6-8"
-    - "9-12"
-    - "College"
-  
-  subjects:
-    - "Mathematics"
-    - "Science"
-    - "English Language Arts"
-    - "Social Studies"
-    - "Arts"
-    - "Physical Education"
-    - "Technology"
-
-apis:
-  open_library:
-    rate_limit: 100  # requests per minute
-  wikipedia:
-    rate_limit: 200  # requests per minute
-  dictionary:
-    rate_limit: 450  # requests per hour
-  arxiv:
-    rate_limit: 3    # requests per second
-```
-
-### Environment Variables
-Override configuration with environment variables:
-```bash
-export OPENEDU_MCP_CACHE_TTL=7200
-export OPENEDU_MCP_LOG_LEVEL=DEBUG
-export OPENEDU_MCP_RATE_LIMIT_WIKIPEDIA=300
-```
-
-## 🏗️ Architecture
+## 배포 (Rancher)
+
+| 항목 | 값 |
+|---|---|
+| Workload명 | `prod-openedu-mcp` |
+| 이미지 | `851725242420.dkr.ecr.ap-northeast-2.amazonaws.com/openedu-mcp:latest` |
+| Container Port | 8000 |
+| 환경변수 | `OPENEDU_MCP_HOST=0.0.0.0`, `OPENEDU_MCP_PORT=8000`, `OPENEDU_MCP_CACHE_PATH=/data/cache.db` |
+| PVC | `prod-openedu-mcp-data` (EBS gp3, RWO, 1Gi) → `/data` 마운트 |
+| Deployment 전략 | **Recreate** (RollingUpdate → 변경, RWO Multi-Attach 데드락 방지, replica 1) |
+| Service | NodePort, 35618 |
+
+### 프로덕션 엔드포인트
 
 ```
-Education MCP Server
-├── API Layer (FastMCP)
-│   ├── 20+ MCP Tools
-│   └── Request/Response Handling
-├── Service Layer
-│   ├── Cache Service (SQLite)
-│   ├── Rate Limiting Service
-│   └── Usage Tracking Service
-├── Tool Layer
-│   ├── Open Library Tools
-│   ├── Wikipedia Tools
-│   ├── Dictionary Tools
-│   └── arXiv Tools
-├── API Layer
-│   ├── Open Library API
-│   ├── Wikipedia API
-│   ├── Dictionary API
-│   └── arXiv API
-└── Data Layer
-    ├── Educational Models
-    ├── Cache Database
-    └── Usage Analytics
+http://k8s-aws-pri.goover.ai:35618/mcp
 ```
 
-## 📊 Performance
+## 이 포크만의 특징적인 사항
 
-### Caching Strategy
-- **Cache Hit Rate**: >70% for repeated queries
-- **Response Time**: <500ms for cached requests, <2000ms for uncached
-- **Cache Size**: Configurable with automatic cleanup
-- **TTL Management**: Intelligent expiration based on content type
+- 원본 저장소는 stdio 전용으로만 검증되어 있었고, 미완성 HTTP/SSE 코드가 import 시점에 서버 전체를 크래시시키는 상태로 방치되어 있었습니다. 단순 설정 누락 수준이 아니라 **실행 자체가 불가능한 수준의 결함**이었습니다.
+- `mcp` 패키지가 직접 의존성이 아니라 `fastmcp` 패키지의 전이 의존성으로만 존재해 패키징이 취약했습니다. 직접 의존성으로 명시해 향후 breaking change에 대비했습니다.
+- config 로더가 상대경로에 의존하는 구조라, 코드 수정 대신 Dockerfile `WORKDIR`로 우회 해결했습니다.
+- 캐시 서비스와 사용량 통계 서비스가 동일한 SQLite 파일을 공유합니다.
+- 4개 외부 API(Open Library, Wikipedia, Dictionary API, arXiv) 모두 인증/API 키가 필요 없어 자격증명 관리 이슈가 없습니다.
 
-### Rate Limiting
-- **Open Library**: 100 requests/minute
-- **Wikipedia**: 200 requests/minute  
-- **Dictionary**: 450 requests/hour
-- **arXiv**: 3 requests/second
+## 라이선스
 
-### Concurrent Handling
-- **Async Operations**: Non-blocking I/O for all API calls
-- **Connection Pooling**: Efficient HTTP connection management
-- **Resource Limits**: Configurable memory and disk usage limits
-
-## 🧪 Testing
-
-### Run All Tests
-```bash
-# Unit tests
-pytest tests/test_tools/ -v
-
-# Integration tests
-pytest tests/test_integration/ -v
-
-# Performance tests
-pytest tests/test_performance.py -v
-
-# Real API tests (requires internet)
-make validate
-```
-
-### Test Coverage
-```bash
-pytest --cov=src --cov-report=html
-open htmlcov/index.html
-```
-
-### Validation Tests
-```bash
-make validate
-```
-
-## 🧪 Real API Validation Tests
-
-We've implemented comprehensive real-world validation tests to ensure production readiness. These tests verify functionality against live services, not mocks.
-
-### Features
-- Tests all 20+ MCP tools against their respective live APIs
-- Validates educational workflows for different grade levels
-- Measures performance metrics (response times, cache rates, error rates)
-- Tests error handling with invalid inputs and edge cases
-- Verifies caching behavior with real API responses
-
-### Running Validation Tests
-```bash
-python run_validation_tests.py
-```
-
-The script will:
-1. Test all API integrations (Open Library, Wikipedia, Dictionary, arXiv)
-2. Validate educational workflows:
-   - Elementary Education (K-2)
-   - High School STEM (9-12)
-   - College Research
-   - Educator Resources
-3. Measure performance metrics:
-   - Response times for each API
-   - Cache hit/miss rates
-   - Rate limiting effectiveness
-   - Educational filtering processing time
-4. Generate a detailed JSON report with test results and performance statistics
-
-### Test Cases
-1. **Open Library**:
-   - Search for "Harry Potter" with grade-level filtering
-   - Get book details by ISBN (e.g., 9780439064866)
-   - Check availability for a known book
-   - Verify educational metadata enrichment
-
-2. **Wikipedia**:
-   - Search for "Quantum Mechanics" with academic level filtering
-   - Get article summary for "Albert Einstein"
-   - Retrieve featured article of the day
-   - Verify content analysis and complexity scoring
-
-3. **Dictionary API**:
-   - Get definition for "photosynthesis" with educational context
-   - Test pronunciation guide for "quinoa"
-   - Verify vocabulary analysis for STEM terms
-   - Test grade-level appropriate definitions
-
-4. **arXiv**:
-   - Search for "machine learning" papers with educational filtering
-   - Get recent AI research papers
-   - Verify academic level assessment
-   - Test research trend analysis
-
-## 📚 Documentation
-
-- **[Educational Features Guide](docs/EDUCATIONAL_FEATURES.md)**: Complete educational capabilities
-- **[API Reference](docs/API_REFERENCE.md)**: Detailed MCP tool documentation
-- **[Performance Benchmarks](docs/PERFORMANCE.md)**: Real-world test results and metrics
-- **[Deployment Guide](docs/DEPLOYMENT.md)**: Production deployment instructions
-- **[Performance Guide](docs/PERFORMANCE.md)**: Optimization and monitoring
-
-## 🔧 Development Status
-
-**✅ COMPLETE - All Features Implemented**
-
-### Core Infrastructure ✅
-- [x] Project structure and configuration
-- [x] Core services (caching, rate limiting, usage tracking)
-- [x] Base models and validation
-- [x] FastMCP server setup
-- [x] Educational filtering framework
-
-### API Integrations ✅
-- [x] Open Library API integration (4 tools)
-- [x] Wikipedia API integration (5 tools)
-- [x] Dictionary API integration (5 tools)
-- [x] arXiv API integration (5 tools)
-- [x] Educational content filtering
-- [x] Cross-API educational workflows
-
-### Testing & Documentation ✅
-- [x] Comprehensive unit tests
-- [x] Integration test suite
-- [x] Performance benchmarks
-- [x] Demo script with all features
-- [x] Complete documentation
-- [x] API reference guide
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for new functionality
-5. Run the test suite (`pytest`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
-
-### Development Guidelines
-- Follow PEP 8 style guidelines
-- Add type hints for all functions
-- Include docstrings for all public methods
-- Write tests for new features
-- Update documentation as needed
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🆘 Support
-
-For questions, issues, or contributions:
-
-- **Issues**: Create an issue in the repository
-- **Documentation**: Check the `docs/` directory
-- **Discussions**: Use GitHub Discussions for questions
-- **Email**: Contact the maintainers
-
-## 🙏 Acknowledgments
-
-- Built with [FastMCP](https://github.com/jlowin/fastmcp) framework
-- Integrates with Open Library, Wikipedia, Dictionary API, and arXiv
-- Designed for educational use cases and curriculum planning
-- Inspired by the need for accessible educational technology
-
----
-
-**OpenEdu MCP Server** - Empowering educators with intelligent educational resource discovery and curriculum planning tools.
+원본 저장소([Cicatriiz/openedu-mcp](https://github.com/Cicatriiz/openedu-mcp))의 라이선스를 따릅니다. 재배포·상업적 사용 전 원본 LICENSE 파일을 반드시 확인하시기 바랍니다.
