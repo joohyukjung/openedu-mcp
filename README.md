@@ -195,10 +195,6 @@ docker run -d --name openedu-mcp-test -p 8069:8000 openedu-mcp:latest
 - `tools/list` — 22개 도구 정상 반환
 - `tools/call`(`get_word_definition`, `"photosynthesis"`) — dictionaryapi.dev 실제 호출 성공, 정의·발음·교육 메타데이터까지 정상 반환
 
-## 배포
-
-내부 인프라(ECR, Rancher/K8s) 배포 설정은 보안상 이 문서에서 제외했습니다. 배포 관련 문의는 내부 인프라 담당자에게 문의해 주세요.
-
 ## 이 포크만의 특징적인 사항
 
 - 원본 저장소는 stdio 전용으로만 검증되어 있었고, 미완성 HTTP/SSE 코드가 import 시점에 서버 전체를 크래시시키는 상태로 방치되어 있었습니다. 단순 설정 누락 수준이 아니라 **실행 자체가 불가능한 수준의 결함**이었습니다.
