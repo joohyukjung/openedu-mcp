@@ -143,7 +143,7 @@ class TestDictionaryTool:
         dictionary_tool.client.get_comprehensive_data.return_value = sample_dictionary_response
         
         # Mock the execute_with_monitoring method to call the function directly
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -169,7 +169,7 @@ class TestDictionaryTool:
         # Mock the client to return empty response
         dictionary_tool.client.get_comprehensive_data.return_value = {}
         
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -182,7 +182,7 @@ class TestDictionaryTool:
         """Test successful vocabulary analysis."""
         dictionary_tool.client.get_comprehensive_data.return_value = sample_dictionary_response
         
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -212,7 +212,7 @@ class TestDictionaryTool:
             "Her work in the inner city was a real education"
         ]
         
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -238,7 +238,7 @@ class TestDictionaryTool:
             "source": ""
         }
         
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -258,7 +258,7 @@ class TestDictionaryTool:
         """Test pronunciation guide when pronunciation is not available."""
         dictionary_tool.client.get_phonetics.return_value = {}
         
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -271,7 +271,7 @@ class TestDictionaryTool:
         """Test successful related vocabulary retrieval."""
         dictionary_tool.client.get_comprehensive_data.return_value = sample_dictionary_response
         
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute
@@ -291,7 +291,7 @@ class TestDictionaryTool:
     @pytest.mark.asyncio
     async def test_get_related_vocabulary_invalid_type(self, dictionary_tool):
         """Test related vocabulary with invalid relationship type."""
-        async def mock_execute(method_name, method_func, user_session=None):
+        async def mock_execute(method_name, method_func, *args, **kwargs):
             return await method_func()
         
         dictionary_tool.execute_with_monitoring = mock_execute

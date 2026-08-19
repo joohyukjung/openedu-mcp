@@ -143,7 +143,12 @@ class DictionaryTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_word_definition",
             _get_definition,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "word": word,
+                "grade_level": grade_level,
+                "include_pronunciation": include_pronunciation,
+            },
         )
     
     async def get_vocabulary_analysis(
@@ -201,7 +206,11 @@ class DictionaryTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_vocabulary_analysis",
             _analyze_vocabulary,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "word": word,
+                "context": context,
+            },
         )
     
     async def get_word_examples(
@@ -261,7 +270,12 @@ class DictionaryTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_word_examples",
             _get_examples,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "word": word,
+                "grade_level": grade_level,
+                "subject": subject,
+            },
         )
     
     async def get_pronunciation_guide(
@@ -310,7 +324,11 @@ class DictionaryTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_pronunciation_guide",
             _get_pronunciation,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "word": word,
+                "include_audio": include_audio,
+            },
         )
     
     async def get_related_vocabulary(
@@ -384,7 +402,13 @@ class DictionaryTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_related_vocabulary",
             _get_related,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "word": word,
+                "relationship_type": relationship_type,
+                "grade_level": grade_level,
+                "limit": limit,
+            },
         )
     
     async def _enrich_educational_metadata(

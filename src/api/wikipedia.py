@@ -36,7 +36,9 @@ class WikipediaClient:
         """
         self.config = config
         self.base_url = config.apis.wikipedia.base_url
-        self.action_api_url = "https://en.wikipedia.org/w/api.php"
+        self.action_api_template = "https://{lang}.wikipedia.org/w/api.php"
+        # Kept for backwards compatibility; prefer _action_api_url(lang)
+        self.action_api_url = self.action_api_template.format(lang='en')
         self.timeout = config.apis.wikipedia.timeout
         self.retry_attempts = config.apis.wikipedia.retry_attempts
         self.backoff_factor = config.apis.wikipedia.backoff_factor
@@ -64,12 +66,43 @@ class WikipediaClient:
         if self._session and not self._session.closed:
             await self._session.close()
     
+    def _action_api_url(self, lang: str = 'en') -> str:
+        """Build the action API endpoint for a given language edition."""
+        return self.action_api_template.format(lang=lang)
+
+    @staticmethod
+    def _normalize_params(params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Coerce query parameters into types aiohttp/yarl accepts.
+
+        yarl rejects `bool` outright, so booleans must never reach the request.
+        MediaWiki treats flag parameters as "present means true", so True becomes
+        '1' and False/None are dropped entirely.
+
+        Args:
+            params: Raw query parameters
+
+        Returns:
+            Parameters safe to hand to aiohttp
+        """
+        if not params:
+            return params
+
+        normalized: Dict[str, Any] = {}
+        for key, value in params.items():
+            if value is None or value is False:
+                continue
+            normalized[key] = '1' if value is True else value
+
+        return normalized
+
     async def _make_request(
         self,
         url: str,
         params: Optional[Dict[str, Any]] = None,
         retry_count: int = 0,
-        use_action_api: bool = False
+        use_action_api: bool = False,
+        lang: str = 'en'
     ) -> Dict[str, Any]:
         """
         Make HTTP request with retry logic and error handling.
@@ -79,6 +112,7 @@ class WikipediaClient:
             params: Query parameters
             retry_count: Current retry attempt
             use_action_api: Whether to use the action API base URL
+            lang: Language edition to use when hitting the action API
             
         Returns:
             JSON response data
@@ -87,13 +121,13 @@ class WikipediaClient:
             APIError: If request fails after all retries
         """
         if not url.startswith('http'):
-            base = self.action_api_url if use_action_api else self.base_url
+            base = self._action_api_url(lang) if use_action_api else self.base_url
             url = urljoin(base, url)
         
         session = await self._get_session()
         
         try:
-            async with session.get(url, params=params) as response:
+            async with session.get(url, params=self._normalize_params(params)) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data
@@ -102,7 +136,7 @@ class WikipediaClient:
                         wait_time = self.backoff_factor ** retry_count
                         logger.warning(f"Rate limited, waiting {wait_time}s before retry")
                         await asyncio.sleep(wait_time)
-                        return await self._make_request(url, params, retry_count + 1, use_action_api)
+                        return await self._make_request(url, params, retry_count + 1, use_action_api, lang)
                     else:
                         raise APIError(f"Rate limited after {self.retry_attempts} retries", "wikipedia")
                 elif response.status == 404:
@@ -116,9 +150,11 @@ class WikipediaClient:
                 wait_time = self.backoff_factor ** retry_count
                 logger.warning(f"Request failed, retrying in {wait_time}s: {e}")
                 await asyncio.sleep(wait_time)
-                return await self._make_request(url, params, retry_count + 1, use_action_api)
+                return await self._make_request(url, params, retry_count + 1, use_action_api, lang)
             else:
                 raise APIError(f"Request failed after {self.retry_attempts} retries: {e}", "wikipedia")
+        except APIError:
+            raise  # Already a well-formed API error; don't double-wrap it
         except Exception as e:
             raise APIError(f"Unexpected error: {e}", "wikipedia")
     
@@ -202,7 +238,7 @@ class WikipediaClient:
         
         try:
             # Use action API for search
-            response = await self._make_request('', params, use_action_api=True)
+            response = await self._make_request('', params, use_action_api=True, lang=lang)
             
             if 'query' not in response or 'search' not in response['query']:
                 return []
@@ -279,14 +315,14 @@ class WikipediaClient:
                 'format': 'json',
                 'titles': title,
                 'prop': 'extracts|info|categories',
-                'exintro': True,
-                'explaintext': True,
+                'exintro': '1',
+                'explaintext': '1',
                 'exsectionformat': 'plain',
                 'inprop': 'url',
                 'utf8': 1
             }
             
-            response = await self._make_request('', params, use_action_api=True)
+            response = await self._make_request('', params, use_action_api=True, lang=lang)
             
             if 'query' not in response or 'pages' not in response['query']:
                 return {}
@@ -345,7 +381,7 @@ class WikipediaClient:
                 'utf8': 1
             }
             
-            response = await self._make_request('', params, use_action_api=True)
+            response = await self._make_request('', params, use_action_api=True, lang=lang)
             
             if 'query' not in response or 'pages' not in response['query']:
                 return {}
@@ -474,7 +510,7 @@ class WikipediaClient:
                 'utf8': 1
             }
             
-            response = await self._make_request('', params, use_action_api=True)
+            response = await self._make_request('', params, use_action_api=True, lang=lang)
             
             if 'query' not in response or 'pages' not in response['query']:
                 return []
@@ -500,7 +536,7 @@ class WikipediaClient:
                         'utf8': 1
                     }
                     
-                    img_response = await self._make_request('', img_params, use_action_api=True)
+                    img_response = await self._make_request('', img_params, use_action_api=True, lang=lang)
                     
                     if 'query' in img_response and 'pages' in img_response['query']:
                         img_pages = img_response['query']['pages']

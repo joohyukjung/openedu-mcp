@@ -638,5 +638,174 @@ class TestWikipediaIntegration:
         pass
 
 
+class TestWikipediaClientQueryParams:
+    """Regression tests for the boolean query-parameter bug.
+
+    aiohttp hands query params to yarl, which rejects Python bools outright with
+    "Invalid variable type: value should be str, int or float". The action-API
+    fallback in get_article_summary used to pass `exintro=True`, so any title
+    whose REST summary 404s (e.g. an English title on ko.wikipedia) crashed.
+    """
+
+    @pytest.fixture
+    def mock_config(self):
+        config = MagicMock()
+        config.apis = MagicMock()
+        config.apis.wikipedia = MagicMock()
+        config.apis.wikipedia.base_url = "https://en.wikipedia.org/api/rest_v1"
+        config.apis.wikipedia.timeout = 30
+        config.apis.wikipedia.retry_attempts = 2
+        config.apis.wikipedia.backoff_factor = 2.0
+        config.server = MagicMock()
+        config.server.name = "test-server"
+        config.server.version = "1.0.0"
+        return config
+
+    @pytest.fixture
+    def wikipedia_client(self, mock_config):
+        return WikipediaClient(mock_config)
+
+    def test_normalize_params_strips_booleans(self, wikipedia_client):
+        """True becomes '1'; False/None drop out (MediaWiki flag convention)."""
+        normalized = wikipedia_client._normalize_params({
+            'exintro': True,
+            'disabled': False,
+            'absent': None,
+            'utf8': 1,
+            'action': 'query',
+        })
+
+        assert normalized == {'exintro': '1', 'utf8': 1, 'action': 'query'}
+        assert not any(isinstance(v, bool) for v in normalized.values())
+
+    def test_normalize_params_passes_through_empty(self, wikipedia_client):
+        assert wikipedia_client._normalize_params(None) is None
+        assert wikipedia_client._normalize_params({}) == {}
+
+    @pytest.mark.asyncio
+    async def test_summary_fallback_sends_no_booleans(self, wikipedia_client):
+        """The REST-404 fallback path must not put a bool on the wire."""
+        captured = {}
+
+        async def fake_request(url, params=None, retry_count=0, use_action_api=False, lang='en'):
+            if not use_action_api:
+                return {}  # REST summary 404 -> {} -> triggers the fallback
+            captured['url'] = url
+            captured['params'] = params
+            captured['lang'] = lang
+            return {"query": {"pages": {"1": {"title": "T", "extract": "e", "pageid": 1}}}}
+
+        with patch.object(wikipedia_client, '_make_request', side_effect=fake_request):
+            await wikipedia_client.get_article_summary("Saltlux", "ko")
+
+        assert captured['params'], "fallback should have been reached"
+        bools = {k: v for k, v in captured['params'].items() if isinstance(v, bool)}
+        assert bools == {}, f"boolean params would crash yarl: {bools}"
+        assert captured['params']['exintro'] == '1'
+        assert captured['params']['explaintext'] == '1'
+
+    @pytest.mark.asyncio
+    async def test_summary_fallback_uses_requested_language(self, wikipedia_client):
+        """The action API must follow `lang`, not the hardcoded en wiki."""
+        captured = {}
+
+        async def fake_request(url, params=None, retry_count=0, use_action_api=False, lang='en'):
+            if not use_action_api:
+                return {}
+            captured['lang'] = lang
+            return {}
+
+        with patch.object(wikipedia_client, '_make_request', side_effect=fake_request):
+            await wikipedia_client.get_article_summary("Saltlux", "ko")
+
+        assert captured['lang'] == 'ko'
+
+        # And _make_request must actually resolve that lang into the base URL
+        resolved = {}
+
+        class FakeResponse:
+            status = 200
+
+            async def json(self):
+                return {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        class FakeSession:
+            def get(self, url, params=None):
+                resolved['url'] = url
+                return FakeResponse()
+
+        with patch.object(wikipedia_client, '_get_session', new_callable=AsyncMock) as mock_session:
+            mock_session.return_value = FakeSession()
+            await wikipedia_client._make_request('', {'action': 'query'}, use_action_api=True, lang='ko')
+
+        assert resolved['url'] == "https://ko.wikipedia.org/w/api.php"
+
+    @pytest.mark.asyncio
+    async def test_real_bool_param_reaches_aiohttp_safely(self, wikipedia_client):
+        """End-to-end through _make_request: a bool must be coerced, not raised on."""
+        captured = {}
+
+        class FakeResponse:
+            status = 200
+
+            async def json(self):
+                return {"ok": True}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        class FakeSession:
+            def get(self, url, params=None):
+                captured['params'] = params
+                return FakeResponse()
+
+        with patch.object(wikipedia_client, '_get_session', new_callable=AsyncMock) as mock_session:
+            mock_session.return_value = FakeSession()
+            result = await wikipedia_client._make_request(
+                'https://ko.wikipedia.org/w/api.php', {'exintro': True}
+            )
+
+        assert result == {"ok": True}
+        assert captured['params'] == {'exintro': '1'}
+
+    @pytest.mark.asyncio
+    async def test_api_error_is_not_double_wrapped(self, wikipedia_client):
+        """An APIError raised inside the try block must pass through unchanged."""
+
+        class FakeResponse:
+            status = 500
+
+            async def text(self):
+                return "boom"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        class FakeSession:
+            def get(self, url, params=None):
+                return FakeResponse()
+
+        with patch.object(wikipedia_client, '_get_session', new_callable=AsyncMock) as mock_session:
+            mock_session.return_value = FakeSession()
+            with pytest.raises(APIError) as exc_info:
+                await wikipedia_client._make_request('https://ko.wikipedia.org/w/api.php')
+
+        message = str(exc_info.value)
+        assert "Unexpected error" not in message
+        assert "HTTP 500" in message
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

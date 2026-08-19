@@ -165,7 +165,14 @@ class ArxivTool(BaseTool):
         return await self.execute_with_monitoring(
             "search_academic_papers",
             _search,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "query": query,
+                "subject": subject,
+                "academic_level": academic_level,
+                "max_results": max_results,
+                "include_educational_analysis": include_educational_analysis,
+            },
         )
     
     async def get_paper_summary(
@@ -208,7 +215,11 @@ class ArxivTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_paper_summary",
             _get_summary,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "paper_id": paper_id,
+                "include_educational_analysis": include_educational_analysis,
+            },
         )
     
     async def get_recent_research(
@@ -292,7 +303,13 @@ class ArxivTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_recent_research",
             _get_recent,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "subject": subject,
+                "days": days,
+                "academic_level": academic_level,
+                "max_results": max_results,
+            },
         )
     
     async def get_research_by_level(
@@ -390,7 +407,12 @@ class ArxivTool(BaseTool):
         return await self.execute_with_monitoring(
             "get_research_by_level",
             _get_by_level,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "academic_level": academic_level,
+                "subject": subject,
+                "max_results": max_results,
+            },
         )
     
     async def analyze_research_trends(
@@ -451,7 +473,11 @@ class ArxivTool(BaseTool):
         return await self.execute_with_monitoring(
             "analyze_research_trends",
             _analyze_trends,
-            user_session=user_session
+            user_session=user_session,
+            cache_params={
+                "subject": subject,
+                "days": days,
+            },
         )
     
     async def _enrich_educational_metadata(

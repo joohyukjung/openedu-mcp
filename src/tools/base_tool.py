@@ -6,6 +6,7 @@ providing common functionality like caching, rate limiting, and error handling.
 """
 
 import asyncio
+import hashlib
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -25,6 +26,20 @@ from utils.validation import Validator
 
 
 logger = logging.getLogger(__name__)
+
+# Bumped whenever the cache key layout changes, so stale entries written by an
+# older (buggy) scheme are never served after a deploy.
+CACHE_KEY_VERSION = "v2"
+
+
+def _stable_digest(value: Any) -> str:
+    """
+    Digest a complex value into a process-independent string.
+
+    The builtin hash() is randomized per process (PYTHONHASHSEED), which makes
+    cache keys differ between workers and restarts.
+    """
+    return hashlib.sha256(str(value).encode('utf-8')).hexdigest()[:16]
 
 
 class BaseTool(ABC):
@@ -55,6 +70,7 @@ class BaseTool(ABC):
         method_func,
         *args,
         user_session: Optional[str] = None,
+        cache_params: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> Any:
         """
@@ -65,6 +81,12 @@ class BaseTool(ABC):
             method_func: The method function to execute
             *args: Positional arguments for the method
             user_session: User session identifier
+            cache_params: Parameters that identify this call for caching purposes.
+                Tool methods wrap their work in a zero-argument closure, so the
+                arguments that actually determine the result are invisible here
+                unless they are passed explicitly. Caching is disabled when this
+                is omitted, because a key built without them would collide across
+                every call to the same method.
             **kwargs: Keyword arguments for the method
             
         Returns:
@@ -79,9 +101,19 @@ class BaseTool(ABC):
         result = None
         result_count = None
         
+        # Parameters recorded for usage analytics
+        logged_params = {**kwargs, **(cache_params or {})}
+        
         try:
             # Generate cache key
-            cache_key = self._generate_cache_key(method_name, *args, **kwargs)
+            if cache_params is None:
+                cache_key = None
+                logger.warning(
+                    f"No cache_params supplied for {self.tool_name}.{method_name}; "
+                    "caching disabled to avoid cross-parameter cache collisions"
+                )
+            else:
+                cache_key = self._generate_cache_key(method_name, *args, **logged_params)
             
             # Try to get from cache first
             if cache_key:
@@ -101,7 +133,7 @@ class BaseTool(ABC):
                         cache_hit=True,
                         error_occurred=False,
                         user_session=user_session,
-                        parameters=self._sanitize_parameters(kwargs),
+                        parameters=self._sanitize_parameters(logged_params),
                         result_count=result_count
                     )
                     
@@ -157,7 +189,7 @@ class BaseTool(ABC):
                 cache_hit=cache_hit,
                 error_occurred=error_occurred,
                 user_session=user_session,
-                parameters=self._sanitize_parameters(kwargs),
+                parameters=self._sanitize_parameters(logged_params),
                 result_count=result_count
             )
         
@@ -177,7 +209,7 @@ class BaseTool(ABC):
         """
         try:
             # Create a deterministic key from method name and parameters
-            key_parts = [self.tool_name, method_name]
+            key_parts = [CACHE_KEY_VERSION, self.tool_name, method_name]
             
             # Add positional arguments
             for arg in args:
@@ -185,22 +217,24 @@ class BaseTool(ABC):
                     key_parts.append(str(arg))
                 else:
                     # For complex objects, use their string representation
-                    key_parts.append(str(hash(str(arg))))
+                    key_parts.append(_stable_digest(arg))
             
             # Add keyword arguments (sorted for consistency)
             for key, value in sorted(kwargs.items()):
                 if isinstance(value, (str, int, float, bool, type(None))):
                     key_parts.append(f"{key}:{value}")
                 else:
-                    key_parts.append(f"{key}:{hash(str(value))}")
+                    key_parts.append(f"{key}:{_stable_digest(value)}")
             
             # Join with separator and hash if too long
             cache_key = "|".join(key_parts)
             
             # Limit key length
             if len(cache_key) > 250:
-                import hashlib
-                cache_key = f"{self.tool_name}:{method_name}:{hashlib.md5(cache_key.encode()).hexdigest()}"
+                cache_key = (
+                    f"{CACHE_KEY_VERSION}:{self.tool_name}:{method_name}:"
+                    f"{hashlib.sha256(cache_key.encode('utf-8')).hexdigest()}"
+                )
             
             return cache_key
             
